@@ -28,6 +28,21 @@ if not TOKEN:
 class FSMPrefixes:
     SCHEDULE_PREFIX = 'schedule:'
     GROUP_SETUP = 'group:'
+    HANDLER = 'handler:'
+    TEACHER = 'teacher:'
+    MY = 'my:'
+
+
+class Callbacks:
+    TEACHER_TODAY_SCHEDULE = f'{FSMPrefixes.TEACHER}schedule@today'
+    TEACHER_TOMORROW_SCHEDULE = f'{FSMPrefixes.TEACHER}schedule@tomorrow'
+    TEACHER_WEEK_SCHEDULE = f'{FSMPrefixes.TEACHER}schedule@week'
+    GROUP_TODAY_SCHEDULE = f'{FSMPrefixes.GROUP_SETUP}schedule@today'
+    GROUP_TOMORROW_SCHEDULE = f'{FSMPrefixes.GROUP_SETUP}schedule@tomorrow'
+    GROUP_WEEK_SCHEDULE = f'{FSMPrefixes.GROUP_SETUP}schedule@week'
+    MY_TODAY_SCHEDULE = f'{FSMPrefixes.MY}schedule@today'
+    MY_TOMORROW_SCHEDULE = f'{FSMPrefixes.MY}schedule@tomorrow'
+    MY_WEEK_SCHEDULE = f'{FSMPrefixes.MY}schedule@week'
 
 
 class FSMStates:
@@ -36,15 +51,16 @@ class FSMStates:
     MY_SCHEDULE_TODAY = f'{FSMPrefixes.SCHEDULE_PREFIX}my@today'
     MY_SCHEDULE_TOMORROW = f'{FSMPrefixes.SCHEDULE_PREFIX}my@tomorrow'
     MY_SCHEDULE_WEEK = f'{FSMPrefixes.SCHEDULE_PREFIX}my@week'
-    MY_SCHEDULE_WEEK_CURRENT = f'{FSMPrefixes.SCHEDULE_PREFIX}my@week~current'
-    MY_SCHEDULE_WEEK_NEXT = f'{FSMPrefixes.SCHEDULE_PREFIX}my@week~next'
     GROUP_SCHEDULE_GENERAL = f'{FSMPrefixes.GROUP_SETUP}group@start'
     SCHEDULE_TODAY = f'{FSMPrefixes.SCHEDULE_PREFIX}group@today'
     SCHEDULE_TOMORROW = f'{FSMPrefixes.SCHEDULE_PREFIX}group@tomorrow'
-    SCHEDULE_WEEK_CURRENT = f'{FSMPrefixes.SCHEDULE_PREFIX}group@week~current'
-    SCHEDULE_WEEK_NEXT = f'{FSMPrefixes.SCHEDULE_PREFIX}group@week~next'
+    SCHEDULE_WEEK_CURRENT = f'{FSMPrefixes.HANDLER}group@week~current'
+    SCHEDULE_WEEK_NEXT = f'{FSMPrefixes.HANDLER}group@week~next'
     SCHEDULE_WEEK = f'{FSMPrefixes.SCHEDULE_PREFIX}group@week'
-    #SCHEDULE_NEXT_WEEK = f'{FSMPrefixes.SCHEDULE_PREFIX}'
+    SCHEDULE_TEACHER_GENERAL = f'{FSMPrefixes.SCHEDULE_PREFIX}teacher@start'
+    TEACHER_SCHEDULE_WEEK = f'{FSMPrefixes.SCHEDULE_PREFIX}teacher@week'
+    # SCHEDULE_NEXT_WEEK = f'{FSMPrefixes.SCHEDULE_PREFIX}'
+
 
 dp = Dispatcher(storage=RedisStorage(redis.Redis()))
 _bot = Bot(TOKEN, parse_mode="HTML")
@@ -100,7 +116,7 @@ def generate_schedule_str(schedule: list[dict], dates=()) -> str:
         res += str(date) + '\n'
         for elect in dates_dict[date]:
             res += f'\t\t<u>{elect.get("beginLesson")}</u> <b>{elect.get("discipline")}</b>\n'
-            res += '\t\t' + elect.get('lecturer') + '\n'
+            res += '\t\t' + elect.get('lecturer') + ' ('+elect.get("auditorium") + ') \n'
         res += '\n\n'
     return res
 
@@ -179,13 +195,15 @@ def construct_menu():
     builder.button(text='Настройки',
                    callback_data=FSMStates.CREATE_PROFILE)
     builder.button(text='Мое расписание на сегодня',
-                   callback_data=FSMStates.MY_SCHEDULE_TODAY)
+                   callback_data=Callbacks.MY_TODAY_SCHEDULE)
     builder.button(text='Мое расписание на завтра',
-                   callback_data=FSMStates.MY_SCHEDULE_TOMORROW)
+                   callback_data=Callbacks.MY_TOMORROW_SCHEDULE)
     builder.button(text='Мое расписание на неделю',
-                   callback_data=FSMStates.MY_SCHEDULE_WEEK)
+                   callback_data=Callbacks.MY_WEEK_SCHEDULE)
     builder.button(text='Поиск расписания по группе',
                    callback_data=FSMStates.GROUP_SCHEDULE_GENERAL)
+    builder.button(text='Поиск расписания по преподавателю',
+                   callback_data=FSMStates.SCHEDULE_TEACHER_GENERAL)
     builder.adjust(1, repeat=True)
     return builder.as_markup()
 
@@ -199,14 +217,28 @@ def construct_weeks_keyboard():
     __add_cancel_button(builder)
     return builder
 
-def construct_schedule_keyboard():
+
+def construct_schedule_keyboard(type_: str = 'group'):
     builder = InlineKeyboardBuilder()
-    builder.button(text='Расписание на сегодня',
-                   callback_data=FSMStates.SCHEDULE_TODAY)
-    builder.button(text='Расписание на завтра',
-                   callback_data=FSMStates.SCHEDULE_TOMORROW)
-    __add_cancel_button(builder)
-    return builder
+    match type_.replace(':', ''):
+        case 'group':
+            builder.button(text='Расписание на сегодня',
+                           callback_data=Callbacks.GROUP_TODAY_SCHEDULE)
+            builder.button(text='Расписание на завтра',
+                           callback_data=Callbacks.GROUP_TOMORROW_SCHEDULE),
+            builder.button(text='Расписание на неделю',
+                           callback_data=Callbacks.GROUP_WEEK_SCHEDULE)
+            __add_cancel_button(builder)
+            return builder
+        case 'teacher':
+            builder.button(text='Расписание на сегодня',
+                           callback_data=Callbacks.TEACHER_TODAY_SCHEDULE)
+            builder.button(text='Расписание на завтра',
+                           callback_data=Callbacks.TEACHER_TOMORROW_SCHEDULE),
+            builder.button(text='Расписание на неделю',
+                           callback_data=Callbacks.TEACHER_WEEK_SCHEDULE)
+            __add_cancel_button(builder)
+            return builder
 
 
 async def return_schedule(
@@ -214,15 +246,24 @@ async def return_schedule(
         message: Message = None,
         dates: tuple = (),
         group_id: int = None,
-        when: str
+        when: str = None,
+        teacher_id: int = None
 ):
-
+    print('schedule', f'{group_id=}', f'{teacher_id=}')
+    entity_type = api.SearchType.GROUP if group_id else api.SearchType.TEACHER
     handler = query_data or message
     message = message or query_data.message
-    group = await db.get_group(group_id)
+    if teacher_id:
+        entity = await db.Teacher.get(teacher_id)
+    else:
+        entity = await db.get_group(group_id)
     key = _key(handler)
-    schedule = await api.get_schedule(group_id, dates=dates)
-    print(schedule)
+    entities_placeholders = {
+        'group': 'группы',
+        'person': 'преподавателя'
+    }
+    schedule = await api.get_schedule(entity.id, search_type=entity_type,
+                                      dates=dates)
     str_schedule = generate_schedule_str(schedule, dates)
     str_date = "сегодня " if when == "today" else \
         f"{str(dates[0]).replace('-', '.')} - " \
@@ -230,8 +271,8 @@ async def return_schedule(
             when == "week" else "завтра"
     if not str_schedule:
         msg = await message.answer(
-            text=f"На {str_date} для группы "
-                 f"<b>{group.label}</b> пар не найдено",
+            text=f"На {str_date} для {entities_placeholders.get(entity_type)} "
+                 f"<b>{entity.label}</b> пар не найдено",
         )
         await delete_last_schedule_message(key)
         await set_last_schedule_message(key, msg)
@@ -239,8 +280,8 @@ async def return_schedule(
         await echo_handler(message)
         return
     else:
-        str_schedule = f'Расписание группы <b>{group.label}</b>' \
-                       f' на {str_date} {"("+str(dates[0]).replace("-", ".")+")" if when != "week" else "" }\n\n' + str_schedule
+        str_schedule = f'Расписание {entities_placeholders.get(entity_type)} <b>{entity.label}</b>' \
+                       f' на {str_date} {"(" + str(dates[0]).replace("-", ".") + ")" if when != "week" else ""}\n\n' + str_schedule
         await delete_last_schedule_message(key)
         if query_data:
             try:
@@ -280,40 +321,22 @@ async def command_start_handler(
             f"\nЗдесь ты можешь узнать расписание.</b>",
             reply_markup=construct_menu()
         )
-    #await set_menu_message(_key(query_data or message), res)
+    # await set_menu_message(_key(query_data or message), res)
     return res
 
 
-@dp.message(StateFilter(FSMStates.MY_SCHEDULE_WEEK))
+@dp.message(StateFilter(FSMStates.MY_SCHEDULE_WEEK, FSMStates.SCHEDULE_WEEK))
 async def input_week(message: Message | CallbackQuery):
-    #TODO: currently can't handle week requests for any group. FIX.
+    # TODO: currently can't handle week requests for any group. FIX.
     key = _key(message)
     state = await dp.storage.get_state(bot, key)
+    teacher_id = None
     if state == FSMStates.MY_SCHEDULE_WEEK:  # TODO: check of any schedule week.
         group_id = (await db.get_profile(message.chat.id)).group_id
     else:
         group_id = (await dp.storage.get_data(bot, key)).get('group')
-
-    if isinstance(message, CallbackQuery):
-        # It's case if we clicked current or next week button.
-        match message.data:
-            case FSMStates.SCHEDULE_WEEK_CURRENT:
-                start, finish = week_from_date(datetime.date.today())
-            case FSMStates.SCHEDULE_WEEK_NEXT:
-                start, finish = week_from_date(
-                    datetime.date.today() + datetime.timedelta(days=7)
-                )
-            case _:
-                await message.answer(
-                    'Я не знаю как вы умудрились, но вы залезли куда не надо.'
-                )
-                await dp.storage.set_state(bot, key=key, state=None)
-                msg = await command_start_handler(query_data=message)
-                await add_to_delete_message(key, msg)
-                return
-        await return_schedule(query_data=message, dates=(start, finish),
-                              group_id=int(group_id), when='week')
-        return
+        if not group_id:
+            teacher_id = (await dp.storage.get_data(bot, key)).get('teacher')
     try:
         date = dateutil.parser.parse(message.text.strip()).date()
     except dateutil.parser.ParserError:
@@ -327,19 +350,78 @@ async def input_week(message: Message | CallbackQuery):
         await add_to_delete_message(_key(message), to_delete)
         return
     start, finish = week_from_date(date)
-    await return_schedule(message=message, dates=(start, finish),
-                          group_id=int(group_id), when='week')
+    if group_id:
+        await return_schedule(message=message, dates=(start, finish),
+                              group_id=int(group_id), when='week')
+    else:
+        await return_schedule(message=message, dates=(start, finish),
+                              teacher_id=int(teacher_id), when='week')
 
 
-@dp.callback_query(F.data.startswith(FSMPrefixes.SCHEDULE_PREFIX))
+# @dp.callback_query(F.data.startswith(FSMPrefixes.HANDLER), )
+@dp.callback_query(F.data.startswith(FSMPrefixes.HANDLER))
+async def handle_week_handler_button_pressed(query_data: CallbackQuery):
+    # It's case if we clicked current or next week button.
+    key = _key(query_data)
+    state = await dp.storage.get_state(bot, key)
+    print('STATE123', state)
+    match state:
+        case FSMStates.MY_SCHEDULE_WEEK:
+            entity_id = (await db.get_profile(query_data.message.chat.id)).group_id
+            entity_type = 'group'
+        case FSMStates.TEACHER_SCHEDULE_WEEK:
+            entity_id = (await dp.storage.get_data(bot, key)).get('teacher')
+            entity_type = 'teacher'
+        case FSMStates.SCHEDULE_WEEK:
+            entity_id = (await dp.storage.get_data(bot, key)).get('group')
+            entity_type = 'group'
+        case _ as err:
+            raise Exception(f'Error, unknown week button: {err=}')
+    match query_data.data:
+        case FSMStates.SCHEDULE_WEEK_CURRENT:
+            start, finish = week_from_date(
+                datetime.date.today())
+        case FSMStates.SCHEDULE_WEEK_NEXT:
+            start, finish = week_from_date(
+                datetime.date.today() + datetime.timedelta(
+                    days=7)
+            )
+        case _:
+            await query_data.answer(
+                'Я не знаю как вы умудрились, но вы залезли куда не надо.'
+            )
+            await dp.storage.set_state(bot, key=key, state=None)
+            msg = await command_start_handler(
+                query_data=query_data)
+            await add_to_delete_message(key, msg)
+            return
+    await return_schedule(
+        query_data=query_data,
+        dates=(start, finish),
+        when='week',
+        **{('group_id' if entity_type == 'group' else 'teacher_id'): entity_id}
+    )
+
+
+@dp.callback_query(F.data.in_([
+    Callbacks.TEACHER_TODAY_SCHEDULE,
+    Callbacks.TEACHER_TOMORROW_SCHEDULE,
+    Callbacks.TEACHER_WEEK_SCHEDULE,
+    Callbacks.GROUP_TODAY_SCHEDULE,
+    Callbacks.GROUP_TOMORROW_SCHEDULE,
+    Callbacks.GROUP_WEEK_SCHEDULE,
+    Callbacks.MY_TODAY_SCHEDULE,
+    Callbacks.MY_TOMORROW_SCHEDULE,
+    Callbacks.MY_WEEK_SCHEDULE
+]))
 async def get_schedule_handler(query_data: CallbackQuery):
     """Кнопки показа расписания"""
     key = _key(query_data)
     profile = await db.get_profile(query_data.message.chat.id)
-    data = query_data.data.replace(FSMPrefixes.SCHEDULE_PREFIX, '')
-    who, when = data.split('@')
-    when, when_prefix, *_ = [*when.split('~'), None]
-    group_id = None
+    who = query_data.data.split(':')[0]
+    when = query_data.data.split('@')[-1]
+    print(who, query_data.data)
+    entity_id = None
     if who == 'my':
         if not profile or not profile.group_id:
             await query_data.message.edit_text(
@@ -350,9 +432,11 @@ async def get_schedule_handler(query_data: CallbackQuery):
                 reply_markup=construct_menu()
             )
             return
-        group_id = profile.group_id
+        entity_id = profile.group_id
+    elif who == 'teacher':
+        entity_id = (await dp.storage.get_data(bot, key)).get('teacher')
     elif who == 'group':
-        group_id = (await dp.storage.get_data(bot, key)).get('group')
+        entity_id = (await dp.storage.get_data(bot, key)).get('group')
     match when:
         case 'today':
             today = datetime.date.today()
@@ -363,29 +447,53 @@ async def get_schedule_handler(query_data: CallbackQuery):
         case 'week':
             # TODO: get from state data.
             # if when_prefix
+
+            # await query_data.message.edit_reply_markup()
+            # TODO:
+            #  MY_SCHEDULE_WEEK TO JUST SCHEDULE_WEEK (IN HANDLER TOO)
+            await dp.storage.set_state(bot, key,
+                                       FSMStates.MY_SCHEDULE_WEEK
+                                       if who == 'my'
+                                       else (
+                                           FSMStates.SCHEDULE_WEEK
+                                           if who == 'group' else
+                                           FSMStates.TEACHER_SCHEDULE_WEEK
+                                       ))
+
             await query_data.message.edit_text(
                 'введите дату (любую дату в промежутке нужной недели)',
                 reply_markup=construct_weeks_keyboard().as_markup()
             )
-            # await query_data.message.edit_reply_markup()
-            # TODO: RENAME MY_SCHEDULE_WEEK TO JUST SCHEDULE_WEEK (IN HANDLER TOO)
-            await dp.storage.set_state(bot, key, FSMStates.MY_SCHEDULE_WEEK)
             await add_to_delete_message(key, query_data.message)
             return
         case _:
             dates = ()
-    await return_schedule(query_data=query_data,
-                          dates=dates, group_id=group_id, when=when)
+    await return_schedule(
+        query_data=query_data,
+        dates=dates,
+        when=when,
+        **{('group_id' if who != 'teacher' else 'teacher_id'): entity_id}
+    )
     # await delete_user_message(key, query_data.message.message_id)
 
 
-@dp.callback_query(F.data == FSMStates.GROUP_SCHEDULE_GENERAL)
+@dp.callback_query(F.data.in_([
+    FSMStates.GROUP_SCHEDULE_GENERAL,
+    FSMStates.SCHEDULE_TEACHER_GENERAL
+]))
 async def pick_group_pressed(query_data: CallbackQuery):
     key = _key(query_data)
+    print('HANDLER CALLED', query_data.data)
     await dp.storage.set_state(bot, key, query_data.data)
-    await query_data.message.edit_text('Введите группу:',
-                                       reply_markup=cancel_button)
-    await add_to_delete_message(key, query_data.message)
+    match query_data.data:
+        case FSMStates.GROUP_SCHEDULE_GENERAL:
+            await query_data.message.edit_text('Введите группу:',
+                                               reply_markup=cancel_button)
+            await add_to_delete_message(key, query_data.message)
+        case FSMStates.SCHEDULE_TEACHER_GENERAL:
+            await query_data.message.edit_text('Введите имя преподавателя:',
+                                               reply_markup=cancel_button)
+            await add_to_delete_message(key, query_data.message)
 
 
 @dp.callback_query(StateFilter(FSMStates.CREATE_PROFILE))
@@ -449,17 +557,34 @@ async def on_button_pressed(query_data: CallbackQuery):
                 reply_markup=construct_schedule_keyboard().as_markup(),
                 parse_mode='html'
             )
+        case ['set_teacher', teacher]:
+            teacher = await db.Teacher.get(int(teacher))
+            await dp.fsm.storage.update_data(bot, key, {'teacher': teacher.id,
+                                                        'group': None})
+            construct_schedule_keyboard()
+            await delete_previous_messages_markup(key)
+            await query_data.message.answer(
+                text=f'Что показать для преподавателя <b>{teacher.label}</b>',
+                reply_markup=construct_schedule_keyboard(
+                    FSMPrefixes.TEACHER).as_markup(),
+                parse_mode='html'
+            )
+        case _ as f:
+            raise Exception(f)
 
 
-@dp.message(StateFilter(FSMStates.GROUP_SCHEDULE_GENERAL))
-async def find_group(message: types.Message):
+dp.message(StateFilter(FSMStates.SCHEDULE_TEACHER_GENERAL))
+
+
+async def find_teacher(message: types.Message):
+    """Hanlder for techer name input"""
     key = _key(message)
-    # TODO: сохранять результат, делать реальный запрос не чаще, чем раз в 20 секунд
-    filtered = await api.search(message.text, search_type=api.SearchType.GROUP)
+    filtered = await api.search(message.text,
+                                search_type=api.SearchType.TEACHER)
     builder = InlineKeyboardBuilder()
     if not filtered:
         msg = await message.answer(
-            'Мы не смогли найти ни одной подходящей группы,'
+            'Мы не смогли найти ни одного подходящего преподавателя,'
             ' попробуйте ввести другой запрос.',
             reply_markup=cancel_button
         )
@@ -468,25 +593,103 @@ async def find_group(message: types.Message):
         await delete_user_message(key, message.message_id)
         return
     if len(filtered) == 1:
-        group = await db.get_group(id_=int(filtered[0].get('id')))
-        await dp.fsm.storage.update_data(bot, key, {'group': group.id})
+        teacher = await db.Teacher.get(int(filtered[0].get('id')))
+        await dp.fsm.storage.update_data(bot, key, {'teacher': teacher.id})
         await delete_previous_messages_markup(key)
         await message.answer(
-            text=f'Что показать для группы <b>{group.label}</b>',
-            reply_markup=construct_schedule_keyboard().as_markup(),
+            text=f'Что показать для преподавателя <b>{teacher.label}</b>',
+            reply_markup=construct_schedule_keyboard(
+                FSMPrefixes.TEACHER).as_markup(),
             parse_mode='html'
         )
         await delete_user_message(key, message.message_id)
         return
-    for group in filtered:
-        await db.set_group(int(group.get('id')), group.get('label'),
-                           group.get('description'))
-        builder.button(text=group.get('label'),
-                       callback_data=f'set_group:{group.get("id")}')
+
+
+@dp.message(StateFilter(
+    FSMStates.GROUP_SCHEDULE_GENERAL,
+    FSMStates.SCHEDULE_TEACHER_GENERAL
+))
+async def find_group(message: types.Message):
+    """Handler for group name input"""
+    key = _key(message)
+    state = await dp.storage.get_state(bot, key)
+    # TODO: сохранять результат, делать реальный запрос не чаще, чем раз в 20 секунд
+    search_type = api.SearchType.GROUP if (
+            state == FSMStates.GROUP_SCHEDULE_GENERAL
+    ) else api.SearchType.TEACHER
+    print(search_type)
+    print('2', state)
+    filtered = await api.search(message.text, search_type=search_type)
+    builder = InlineKeyboardBuilder()
+    if not filtered:
+        filler = ''
+        match search_type:
+            case api.SearchType.GROUP:
+                filler = 'одной подходящей группы'
+            case api.SearchType.TEACHER:
+                filler = 'одного подходящего преподавателя'
+        msg = await message.answer(
+            f'Мы не смогли найти ни {filler},'
+            ' попробуйте ввести другой запрос.',
+            reply_markup=cancel_button
+        )
+        await delete_previous_messages_markup(key=_key(message))
+        await add_to_delete_message(_key(message), msg)
+        await delete_user_message(key, message.message_id)
+        return
+    if len(filtered) == 1:
+        entry_type = 'group' if (
+                state == FSMStates.GROUP_SCHEDULE_GENERAL) else 'teacher'
+        print('entry type:::', entry_type)
+        match entry_type:
+            case 'group':
+                entry = await db.get_group(id_=int(filtered[0].get('id')))
+            case 'teacher':
+                entity = filtered[0]
+                entry = await db.Teacher.update_or_create(
+                    id=int(entity.get('id')),
+                    name=entity.get('label'),
+                    description=entity.get('description')
+                )
+            case _:
+                raise Exception('This never must be called. ENTRY TYPE ERR')
+        await dp.fsm.storage.update_data(bot, key, {entry_type: entry.id})
+        await delete_previous_messages_markup(key)
+        await message.answer(
+            text=f'Что показать для '
+                 f'{"группы" if entry_type == "group" else "преподавателя"}'
+                 f' <b>{entry.label}</b>',
+            reply_markup=construct_schedule_keyboard(entry_type).as_markup(),
+            parse_mode='html'
+        )
+        await delete_user_message(key, message.message_id)
+        return
+    for entity in filtered:
+        match search_type:
+            case api.SearchType.GROUP:
+                await db.set_group(int(entity.get('id')), entity.get('label'),
+                                   entity.get('description'))
+                builder.button(text=entity.get('label'),
+                               callback_data=f'set_group:{entity.get("id")}')
+            case api.SearchType.TEACHER:
+                db_entity = await db.Teacher.update_or_create(
+                    id=int(entity.get('id')),
+                    name=entity.get('label'),
+                    description=entity.get('description')
+                )
+                builder.button(text=db_entity.name,
+                               callback_data=f'set_teacher:{db_entity.id}')
     __add_cancel_button(builder)
     builder.adjust(1)
-    msg = await message.answer(text='По вашему запросу есть вот такие группы:',
-                               reply_markup=builder.as_markup())
+    if search_type == api.SearchType.GROUP:
+        msg = await message.answer(text='По вашему запросу '
+                                        'есть вот такие группы:',
+                                   reply_markup=builder.as_markup())
+    else:
+        msg = await message.answer(text='По вашему запросу '
+                                        'есть вот такие преподаватели:',
+                                   reply_markup=builder.as_markup())
     await delete_previous_messages_markup(key=_key(message))
     await add_to_delete_message(_key(message), msg)
     await delete_user_message(key, message.message_id)

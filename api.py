@@ -17,6 +17,7 @@ class SearchType:
     STUDENT = 'student'
     TEACHER = 'person'
     ROOM = 'auditorium'
+    #TEACHER1 = 'lecturer' #TODO: IDK WHAT LECTURER IS. BUT IT PRESENTED ON SITE
 
 
 async def get_schedule(
