@@ -8,7 +8,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.types import Message, CallbackQuery
-from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.storage.redis import RedisStorage
 import redis.asyncio as redis
 from dotenv import load_dotenv
@@ -115,8 +115,11 @@ def generate_schedule_str(schedule: list[dict], dates=()) -> str:
     for date in dates_dict:
         res += str(date) + '\n'
         for elect in dates_dict[date]:
-            res += f'\t\t<u>{elect.get("beginLesson")}</u> <b>{elect.get("discipline")}</b>\n'
-            res += '\t\t' + elect.get('lecturer') + ' ('+elect.get("auditorium") + ') \n'
+            res += (f'\t\t<u>{elect.get("beginLesson")}</u> '
+                    f'<b>{elect.get("discipline")}</b>'
+                    f'\n')
+            res += ('\t\t' + elect.get('lecturer') + ' ('
+                    + elect.get("auditorium") + ') \n')
         res += '\n\n'
     return res
 
@@ -268,7 +271,7 @@ async def return_schedule(
     str_date = "сегодня " if when == "today" else \
         f"{str(dates[0]).replace('-', '.')} - " \
         f"{str(dates[-1]).replace('-', '.')}" if \
-            when == "week" else "завтра"
+        when == "week" else "завтра"
     if not str_schedule:
         msg = await message.answer(
             text=f"На {str_date} для {entities_placeholders.get(entity_type)} "
@@ -367,7 +370,8 @@ async def handle_week_handler_button_pressed(query_data: CallbackQuery):
     print('STATE123', state)
     match state:
         case FSMStates.MY_SCHEDULE_WEEK:
-            entity_id = (await db.get_profile(query_data.message.chat.id)).group_id
+            entity_id = (
+                await db.get_profile(query_data.message.chat.id)).group_id
             entity_type = 'group'
         case FSMStates.TEACHER_SCHEDULE_WEEK:
             entity_id = (await dp.storage.get_data(bot, key)).get('teacher')
@@ -515,8 +519,8 @@ async def on_create_profile_group_setter(query_data: CallbackQuery):
                     message=query_data.message
                 )
                 await add_to_delete_message(key, msg)
-            profile = await db.update_profile(key.chat_id, group.id,
-                                              query_data.from_user.full_name)
+            await db.update_profile(key.chat_id, group.id,
+                                    query_data.from_user.full_name)
             await query_data.message.edit_text(
                 text='Группа сохранена. Теперь по умолчанию бот считает, '
                      f'что вы в группе <b>{group.label}</b>'
@@ -577,11 +581,10 @@ dp.message(StateFilter(FSMStates.SCHEDULE_TEACHER_GENERAL))
 
 
 async def find_teacher(message: types.Message):
-    """Hanlder for techer name input"""
+    """Handler for teacher name input"""
     key = _key(message)
     filtered = await api.search(message.text,
                                 search_type=api.SearchType.TEACHER)
-    builder = InlineKeyboardBuilder()
     if not filtered:
         msg = await message.answer(
             'Мы не смогли найти ни одного подходящего преподавателя,'

@@ -76,6 +76,7 @@ class Teacher(Base):
         self.name = value
 
 async def get_group(id_: int) -> Group | None:
+    # TODO: Incapsulate into model.
     async with _session.begin() as session:
         res = (await session.execute(select(Group).filter_by(id=id_))).first()
         if not res:

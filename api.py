@@ -17,7 +17,7 @@ class SearchType:
     STUDENT = 'student'
     TEACHER = 'person'
     ROOM = 'auditorium'
-    #TEACHER1 = 'lecturer' #TODO: IDK WHAT LECTURER IS. BUT IT PRESENTED ON SITE
+    # TEACHER1 = 'lecturer'  # TODO: IDK WHAT LECTURER IS. BUT IT's ON SITE
 
 
 async def get_schedule(
@@ -59,7 +59,6 @@ async def get_data(url: str) -> dict | list | None:
 
 async def main():
     rasp = await search('п', SearchType.GROUP)
-
     pprint(rasp)
 
 
