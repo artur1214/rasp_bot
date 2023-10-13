@@ -46,9 +46,6 @@ async def get_data(url: str) -> dict | list | None:
     try:
         async with aiohttp.ClientSession() as s:
             async with s.get(url) as resp:
-                open('main.json', 'w+', encoding='utf-8').write(
-                    await resp.text()
-                )
                 try:
                     return await resp.json()
                 except json.JSONDecodeError:

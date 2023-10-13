@@ -125,38 +125,37 @@ def generate_schedule_str(schedule: list[dict], dates=()) -> str:
 
 
 async def set_menu_message(key: StorageKey, msg: Message):
-    data = await dp.storage.get_data(bot, key)
+    data = await dp.storage.get_data(key)
     prev = data.get('menu_messages', [])
     prev.append(msg.message_id)
-    return await dp.storage.update_data(bot, key, {'menu_messages': prev})
+    return await dp.storage.update_data(key, {'menu_messages': prev})
 
 
 async def delete_menu_messages(key: StorageKey):
-    data = await dp.storage.get_data(bot, key)
+    data = await dp.storage.get_data(key)
     prev = data.get('menu_messages', [])
     for msg_id in prev:
         await delete_user_message(key, msg_id)
-    return await dp.storage.update_data(bot, key, {'menu_messages': []})
+    return await dp.storage.update_data(key, {'menu_messages': []})
 
 
 async def set_last_schedule_message(key: StorageKey, msg: Message):
-    return await dp.storage.update_data(bot, key, {
+    return await dp.storage.update_data(key, {
         'last_schedule': msg.message_id
     })
 
 
 async def add_to_delete_message(key: StorageKey, msg: Message):
-    res = await dp.storage.get_data(bot, key)
+    res = await dp.storage.get_data(key)
     res = res.get('messages_delete_after', [])
     res.append(msg.message_id)
     print('SAVED', res)
-    await dp.storage.update_data(bot, key,
-                                 {'messages_delete_after': list(set(res))})
+    await dp.storage.update_data(key, {'messages_delete_after': list(set(res))})
 
 
 async def delete_previous_messages_markup(key: StorageKey):
     print('REMOVE!')
-    res = await dp.storage.get_data(bot, key)
+    res = await dp.storage.get_data(key)
     last_schedule = res.get('last_schedule', -100)
     res = res.get('messages_delete_after', [])
     for message in res:
@@ -167,14 +166,14 @@ async def delete_previous_messages_markup(key: StorageKey):
             print(message, n)
         except TelegramBadRequest:
             pass
-    await dp.storage.update_data(bot, key, {'messages_delete_after': []})
+    await dp.storage.update_data(key, {'messages_delete_after': []})
 
 
 async def delete_last_schedule_message(key):
-    data = await dp.storage.get_data(bot, key)
+    data = await dp.storage.get_data(key)
     if last := data.get('last_schedule'):
         await delete_user_message(key, last)
-    return await dp.storage.update_data(bot, key, {
+    return await dp.storage.update_data(key, {
         'last_schedule': None
     })
 
@@ -279,7 +278,7 @@ async def return_schedule(
         )
         await delete_last_schedule_message(key)
         await set_last_schedule_message(key, msg)
-        await dp.storage.set_state(bot, _key(handler), state=None)
+        await dp.storage.set_state(_key(handler), state=None)
         await echo_handler(message)
         return
     else:
@@ -332,14 +331,14 @@ async def command_start_handler(
 async def input_week(message: Message | CallbackQuery):
     # TODO: currently can't handle week requests for any group. FIX.
     key = _key(message)
-    state = await dp.storage.get_state(bot, key)
+    state = await dp.storage.get_state(key)
     teacher_id = None
     if state == FSMStates.MY_SCHEDULE_WEEK:  # TODO: check of any schedule week.
         group_id = (await db.get_profile(message.chat.id)).group_id
     else:
-        group_id = (await dp.storage.get_data(bot, key)).get('group')
+        group_id = (await dp.storage.get_data(key)).get('group')
         if not group_id:
-            teacher_id = (await dp.storage.get_data(bot, key)).get('teacher')
+            teacher_id = (await dp.storage.get_data(key)).get('teacher')
     try:
         date = dateutil.parser.parse(message.text.strip()).date()
     except dateutil.parser.ParserError:
@@ -366,7 +365,7 @@ async def input_week(message: Message | CallbackQuery):
 async def handle_week_handler_button_pressed(query_data: CallbackQuery):
     # It's case if we clicked current or next week button.
     key = _key(query_data)
-    state = await dp.storage.get_state(bot, key)
+    state = await dp.storage.get_state(key)
     print('STATE123', state)
     match state:
         case FSMStates.MY_SCHEDULE_WEEK:
@@ -374,10 +373,10 @@ async def handle_week_handler_button_pressed(query_data: CallbackQuery):
                 await db.get_profile(query_data.message.chat.id)).group_id
             entity_type = 'group'
         case FSMStates.TEACHER_SCHEDULE_WEEK:
-            entity_id = (await dp.storage.get_data(bot, key)).get('teacher')
+            entity_id = (await dp.storage.get_data(key)).get('teacher')
             entity_type = 'teacher'
         case FSMStates.SCHEDULE_WEEK:
-            entity_id = (await dp.storage.get_data(bot, key)).get('group')
+            entity_id = (await dp.storage.get_data(key)).get('group')
             entity_type = 'group'
         case _ as err:
             raise Exception(f'Error, unknown week button: {err=}')
@@ -394,7 +393,7 @@ async def handle_week_handler_button_pressed(query_data: CallbackQuery):
             await query_data.answer(
                 'Я не знаю как вы умудрились, но вы залезли куда не надо.'
             )
-            await dp.storage.set_state(bot, key=key, state=None)
+            await dp.storage.set_state(key=key, state=None)
             msg = await command_start_handler(
                 query_data=query_data)
             await add_to_delete_message(key, msg)
@@ -438,9 +437,9 @@ async def get_schedule_handler(query_data: CallbackQuery):
             return
         entity_id = profile.group_id
     elif who == 'teacher':
-        entity_id = (await dp.storage.get_data(bot, key)).get('teacher')
+        entity_id = (await dp.storage.get_data(key)).get('teacher')
     elif who == 'group':
-        entity_id = (await dp.storage.get_data(bot, key)).get('group')
+        entity_id = (await dp.storage.get_data(key)).get('group')
     match when:
         case 'today':
             today = datetime.date.today()
@@ -455,7 +454,7 @@ async def get_schedule_handler(query_data: CallbackQuery):
             # await query_data.message.edit_reply_markup()
             # TODO:
             #  MY_SCHEDULE_WEEK TO JUST SCHEDULE_WEEK (IN HANDLER TOO)
-            await dp.storage.set_state(bot, key,
+            await dp.storage.set_state(key,
                                        FSMStates.MY_SCHEDULE_WEEK
                                        if who == 'my'
                                        else (
@@ -488,7 +487,7 @@ async def get_schedule_handler(query_data: CallbackQuery):
 async def pick_group_pressed(query_data: CallbackQuery):
     key = _key(query_data)
     print('HANDLER CALLED', query_data.data)
-    await dp.storage.set_state(bot, key, query_data.data)
+    await dp.storage.set_state(key, query_data.data)
     match query_data.data:
         case FSMStates.GROUP_SCHEDULE_GENERAL:
             await query_data.message.edit_text('Введите группу:',
@@ -503,13 +502,13 @@ async def pick_group_pressed(query_data: CallbackQuery):
 @dp.callback_query(StateFilter(FSMStates.CREATE_PROFILE))
 async def on_create_profile_group_setter(query_data: CallbackQuery):
     key = _key(query_data)
-    print('PROFILE_CREATE', await dp.storage.get_state(bot, key=key))
+    print('PROFILE_CREATE', await dp.storage.get_state(key=key))
 
     match query_data.data.split(':'):
         case ['set_group', group]:
             group = await db.get_group(group)
             if not group:
-                await dp.fsm.storage.set_state(bot, key, state=None)
+                await dp.fsm.storage.set_state(key, state=None)
                 await query_data.message.edit_text(
                     text='Извините, бот очень тупой, и где-то ошибся, '
                          'попробуйте еще раз,'
@@ -525,11 +524,11 @@ async def on_create_profile_group_setter(query_data: CallbackQuery):
                 text='Группа сохранена. Теперь по умолчанию бот считает, '
                      f'что вы в группе <b>{group.label}</b>'
             )
-            await dp.storage.set_state(bot, key=key, state=None)
+            await dp.storage.set_state(key=key, state=None)
             msg = await command_start_handler(query_data=query_data)
             await add_to_delete_message(key, msg)
         case [FSMStates.CANCEL_ALL]:
-            await dp.storage.set_state(bot, key=key, state=None)
+            await dp.storage.set_state(key=key, state=None)
             msg = await command_start_handler(query_data=query_data)
             await add_to_delete_message(key, msg)
 
@@ -537,10 +536,10 @@ async def on_create_profile_group_setter(query_data: CallbackQuery):
 @dp.callback_query()
 async def on_button_pressed(query_data: CallbackQuery):
     key = _key(query_data)
-    print('DEFAULT_HANDLER', await dp.storage.get_state(bot, key=key))
+    print('DEFAULT_HANDLER', await dp.storage.get_state(key=key))
     match query_data.data.split(':'):
         case [FSMStates.CREATE_PROFILE]:
-            await dp.storage.set_state(bot, key=key,
+            await dp.storage.set_state(key=key,
                                        state=FSMStates.CREATE_PROFILE)
 
             await query_data.message.edit_text(
@@ -548,12 +547,12 @@ async def on_button_pressed(query_data: CallbackQuery):
                 reply_markup=cancel_button)
             await add_to_delete_message(key, query_data.message)
         case [FSMStates.CANCEL_ALL]:
-            await dp.storage.set_state(bot, key=key, state=None)
+            await dp.storage.set_state(key=key, state=None)
             msg = await command_start_handler(query_data=query_data)
             await add_to_delete_message(key, msg)
         case ['set_group', group]:
             group_label = await db.get_group(id_=int(group))
-            await dp.fsm.storage.update_data(bot, key, {'group': group})
+            await dp.fsm.storage.update_data(key, {'group': group})
             construct_schedule_keyboard()
             await delete_previous_messages_markup(key)
             await query_data.message.answer(
@@ -563,7 +562,7 @@ async def on_button_pressed(query_data: CallbackQuery):
             )
         case ['set_teacher', teacher]:
             teacher = await db.Teacher.get(int(teacher))
-            await dp.fsm.storage.update_data(bot, key, {'teacher': teacher.id,
+            await dp.fsm.storage.update_data(key, {'teacher': teacher.id,
                                                         'group': None})
             construct_schedule_keyboard()
             await delete_previous_messages_markup(key)
@@ -597,7 +596,7 @@ async def find_teacher(message: types.Message):
         return
     if len(filtered) == 1:
         teacher = await db.Teacher.get(int(filtered[0].get('id')))
-        await dp.fsm.storage.update_data(bot, key, {'teacher': teacher.id})
+        await dp.fsm.storage.update_data(key, {'teacher': teacher.id})
         await delete_previous_messages_markup(key)
         await message.answer(
             text=f'Что показать для преподавателя <b>{teacher.label}</b>',
@@ -616,7 +615,7 @@ async def find_teacher(message: types.Message):
 async def find_group(message: types.Message):
     """Handler for group name input"""
     key = _key(message)
-    state = await dp.storage.get_state(bot, key)
+    state = await dp.storage.get_state(key)
     # TODO: сохранять результат, делать реальный запрос не чаще, чем раз в 20 секунд
     search_type = api.SearchType.GROUP if (
             state == FSMStates.GROUP_SCHEDULE_GENERAL
@@ -657,7 +656,7 @@ async def find_group(message: types.Message):
                 )
             case _:
                 raise Exception('This never must be called. ENTRY TYPE ERR')
-        await dp.fsm.storage.update_data(bot, key, {entry_type: entry.id})
+        await dp.fsm.storage.update_data(key, {entry_type: entry.id})
         await delete_previous_messages_markup(key)
         await message.answer(
             text=f'Что показать для '
@@ -714,7 +713,7 @@ async def create_profile(message: types.Message):
         )
         await db.set_group(group.get('id'), group.get('label'),
                            group.get('description'))
-        await dp.storage.set_state(_bot, key, None)
+        await dp.storage.set_state(key, None)
         await delete_previous_messages_markup(key=key)
         msg = await command_start_handler(message)
         await add_to_delete_message(key, msg)
