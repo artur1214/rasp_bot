@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 
 import aiogram.exceptions
 import dateutil.parser
@@ -17,7 +18,22 @@ import db
 
 import datetime
 
+
 load_dotenv()
+
+log_path = os.environ.get('LOG_PATH', '.')
+log_filename = os.environ.get('LOG_FILE', 'rasp_bot_log.log')
+log_formatter = logging.Formatter(
+    '%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s'
+)
+log = logging.getLogger(__name__)
+file_handler = logging.FileHandler("{0}/{1}.log".format(log_path, log_filename))
+file_handler.setFormatter(log_formatter)
+log.addHandler(file_handler)
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(log_formatter)
+log.addHandler(console_handler)
+
 
 TOKEN = os.environ.get('TELEGRAM_TOKEN')
 if not TOKEN:
@@ -65,7 +81,6 @@ class FSMStates:
 dp = Dispatcher(storage=RedisStorage(redis.Redis()))
 _bot = Bot(TOKEN, parse_mode="HTML")
 bot: Bot = _bot
-logger = logging.getLogger(__name__)
 
 cancel_button = InlineKeyboardBuilder(). \
     button(text='Отмена', callback_data=FSMStates.CANCEL_ALL).as_markup()
@@ -270,7 +285,7 @@ async def return_schedule(
     str_date = "сегодня " if when == "today" else \
         f"{str(dates[0]).replace('-', '.')} - " \
         f"{str(dates[-1]).replace('-', '.')}" if \
-        when == "week" else "завтра"
+            when == "week" else "завтра"
     if not str_schedule:
         msg = await message.answer(
             text=f"На {str_date} для {entities_placeholders.get(entity_type)} "
@@ -366,7 +381,6 @@ async def handle_week_handler_button_pressed(query_data: CallbackQuery):
     # It's case if we clicked current or next week button.
     key = _key(query_data)
     state = await dp.storage.get_state(key)
-    print('STATE123', state)
     match state:
         case FSMStates.MY_SCHEDULE_WEEK:
             entity_id = (
@@ -423,7 +437,6 @@ async def get_schedule_handler(query_data: CallbackQuery):
     profile = await db.get_profile(query_data.message.chat.id)
     who = query_data.data.split(':')[0]
     when = query_data.data.split('@')[-1]
-    print(who, query_data.data)
     entity_id = None
     if who == 'my':
         if not profile or not profile.group_id:
@@ -486,7 +499,6 @@ async def get_schedule_handler(query_data: CallbackQuery):
 ]))
 async def pick_group_pressed(query_data: CallbackQuery):
     key = _key(query_data)
-    print('HANDLER CALLED', query_data.data)
     await dp.storage.set_state(key, query_data.data)
     match query_data.data:
         case FSMStates.GROUP_SCHEDULE_GENERAL:
@@ -502,8 +514,6 @@ async def pick_group_pressed(query_data: CallbackQuery):
 @dp.callback_query(StateFilter(FSMStates.CREATE_PROFILE))
 async def on_create_profile_group_setter(query_data: CallbackQuery):
     key = _key(query_data)
-    print('PROFILE_CREATE', await dp.storage.get_state(key=key))
-
     match query_data.data.split(':'):
         case ['set_group', group]:
             group = await db.get_group(group)
@@ -536,7 +546,6 @@ async def on_create_profile_group_setter(query_data: CallbackQuery):
 @dp.callback_query()
 async def on_button_pressed(query_data: CallbackQuery):
     key = _key(query_data)
-    print('DEFAULT_HANDLER', await dp.storage.get_state(key=key))
     match query_data.data.split(':'):
         case [FSMStates.CREATE_PROFILE]:
             await dp.storage.set_state(key=key,
@@ -563,7 +572,7 @@ async def on_button_pressed(query_data: CallbackQuery):
         case ['set_teacher', teacher]:
             teacher = await db.Teacher.get(int(teacher))
             await dp.fsm.storage.update_data(key, {'teacher': teacher.id,
-                                                        'group': None})
+                                                   'group': None})
             construct_schedule_keyboard()
             await delete_previous_messages_markup(key)
             await query_data.message.answer(
@@ -620,8 +629,6 @@ async def find_group(message: types.Message):
     search_type = api.SearchType.GROUP if (
             state == FSMStates.GROUP_SCHEDULE_GENERAL
     ) else api.SearchType.TEACHER
-    print(search_type)
-    print('2', state)
     filtered = await api.search(message.text, search_type=search_type)
     builder = InlineKeyboardBuilder()
     if not filtered:
@@ -643,7 +650,6 @@ async def find_group(message: types.Message):
     if len(filtered) == 1:
         entry_type = 'group' if (
                 state == FSMStates.GROUP_SCHEDULE_GENERAL) else 'teacher'
-        print('entry type:::', entry_type)
         match entry_type:
             case 'group':
                 entry = await db.get_group(id_=int(filtered[0].get('id')))
@@ -720,7 +726,6 @@ async def create_profile(message: types.Message):
 
     elif len(groups) > 1:
         res = groups
-        print(groups, len(groups))
         builder = InlineKeyboardBuilder()
         for group in res:
             await db.set_group(group.get('id'), group.get('label'),
@@ -736,8 +741,6 @@ async def create_profile(message: types.Message):
         await add_to_delete_message(_key(message), msg)
     if res is None:
         res = await message.answer('Группа не найдена, попробуйте еще раз:')
-        print(res)
-        print(type(res))
     await delete_user_message(key, message.message_id)
 
 
@@ -753,12 +756,11 @@ async def startup_bot(dispatcher: Dispatcher, bots: tuple[Bot],
                       router: Dispatcher, **kwargs):
     global bot
     bot = kwargs.get('bot', _bot)
-    print('BOT ready and available at ',
+    log.info('BOT ready and available at ',
           f'https://t.me/{(await bot.get_me()).username}')
 
 
 def main() -> None:
-    # And the run events dispatching
     dp.run_polling(_bot)
 
 

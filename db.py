@@ -1,5 +1,5 @@
-# TODO: ПЕРЕПИСАТЬ ВЕСЬ ФАЙЛ. занести связанные функции Group и User
-#  (инкапсулировать)
+# TODO: ПЕРЕПИСАТЬ ВЕСЬ ФАЙЛ. занести связанные функции Group и User в классы
+#  (инкапсулировать как в Teacher)
 import asyncio
 from typing import Self
 
@@ -135,7 +135,6 @@ async def update_profile(chat_id: int,
 
 
 if __name__ == '__main__':
-
     async def x():
         s = await get_profile(1)
         print(str(s.group_id))

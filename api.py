@@ -32,7 +32,6 @@ async def get_schedule(
         else:
             start, finish = str(dates[0]), str(dates[-1])
             url += f'start={quote(start)}&finish={quote(finish)}'
-            print(url)
     return await get_data(url)
 
 
